@@ -1,4 +1,3 @@
-
 library(tidyverse)
 library(lubridate)
 library(data.table)
@@ -7,19 +6,19 @@ library(zoo)
 
 # Set date limits to remove implausible dates
 mind <- as.Date("2018-06-01", tz = "Etc/GMT-2")
-maxd <- as.Date("2022-09-29", tz = "Etc/GMT-2")
+maxd <- as.Date("2022-10-10", tz = "Etc/GMT-2")
 
-# raw_data_dir <- "/scratch/project_2003061/microclim/Tiilikka"
-raw_data_dir <- "C:/Users/OMISTAJA/OneDrive - University of Helsinki/Kesä2022/Varrio2022"
+raw_data_dir <- "/scratch/project_2003061/microclim/Varrio2022"
+# raw_data_dir <- "C:/Users/OMISTAJA/OneDrive - University of Helsinki/Kesä2022/Varrio2022"
 
 #################################################################################3
 # Read year 2020 site visiting times
 
-maxdt20 <- read_csv("data/reading_times_2020.csv")
-maxdt20 %>%  mutate(maxdt = with_tz(maxdt, tzone = "Etc/GMT-2")) -> maxdt20
+maxdt20 <- read_csv("data/reading_times_2020.csv")%>%
+  mutate(maxdt = with_tz(maxdt, tzone = "Etc/GMT-2"))
 
-maxdt21 <- read_csv("data/reading_times_2021.csv")
-maxdt21 %>%  mutate(maxdt = with_tz(maxdt, tzone = "Etc/GMT-2")) -> maxdt21
+maxdt21 <- read_csv("data/reading_times_2021.csv") %>%
+  mutate(maxdt = with_tz(maxdt, tzone = "Etc/GMT-2"))
 
 
 # List logger data files to read
@@ -90,7 +89,6 @@ readdata <- function(i){
   
 }
 
-
 mylist <- lapply(fi$file2, readdata)
 df <- rbindlist( mylist )
 
@@ -117,24 +115,34 @@ df %>% filter(datetime > mind,
 
 sites <- unique(df$site)
 
-
 # Replace the measurements of the time of the 2020 visiting with NA
 # as reading the logger may influence the measurements
-full_join(df, maxdt20 %>% select(-tomst_id) %>% mutate(visit = 1) %>% rename(datetime = maxdt)) %>% 
-  mutate(across(T1:moist, ~ifelse(is.na(visit), ., NA))) %>%
+maxdt20 <- maxdt20 %>% group_by(site) %>% arrange(desc(maxdt)) %>% slice_head(n = 1) %>% ungroup()
+left_join(df, maxdt20 %>% select(-tomst_id) %>% mutate(visit = 1) %>% rename(datetime = maxdt)) %>% 
+  group_by(site, tomst_id) %>%
+  mutate(visit = rollapply(visit, width=3, FUN=sum, na.rm = T, 
+                           fill = NA, partial = T, align = "center")) %>% 
+  mutate(across(T1:moist, ~ifelse(visit == 0, ., NA))) %>%
   select(-visit) -> df
 
 # Remove the measurements of the time of the 2021 visiting
 # as reading the logger may influence the measurements
+maxdt21 <- maxdt21 %>% group_by(site) %>% arrange(desc(maxdt)) %>% slice_head(n = 1) %>% ungroup()
 full_join(df, maxdt21 %>% select(-tomst_id) %>% mutate(visit = 1) %>% rename(datetime = maxdt)) %>% 
-  filter(is.na(visit)) %>%
+  group_by(site, tomst_id) %>%
+  mutate(visit = rollapply(visit, width=3, FUN=sum, na.rm = T, 
+                           fill = NA, partial = T, align = "center")) %>% 
+  mutate(across(T1:moist, ~ifelse(visit == 0, ., NA))) %>%
   select(-visit) -> df
 
 # Remove the measurements of the time of the 2022 visiting
 # as reading the logger may influence the measurements
 maxdt <- maxdt %>% group_by(site) %>% arrange(desc(maxdt)) %>% slice_head(n = 1) %>% ungroup()
 full_join(df, maxdt %>% select(-tomst_id) %>% mutate(visit = 1) %>% rename(datetime = maxdt)) %>% 
-  filter(is.na(visit)) %>%
+  group_by(site, tomst_id) %>%
+  mutate(visit = rollapply(visit, width=3, FUN=sum, na.rm = T, 
+                           fill = NA, partial = T, align = "center")) %>% 
+  mutate(across(T1:moist, ~ifelse(visit == 0, ., NA))) %>%
   select(-visit) -> df
 
 
@@ -176,22 +184,45 @@ df2 %>% mutate(probl = 0) -> df2
 # Plot temperatures
 pdf("visuals/Temperature_graphs.pdf", 12, 5)
 for(i in sites){
-  #i <- sites[3]
+  # i <- "SAA895"
   print(i)
-  df %>% filter(site == i) %>% 
-    #group_by(date) %>% 
-    #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
-    #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
-    ggplot(aes_string(x="datetime")) +
-    geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
-    geom_line(aes_string(y = "T2"), col = "brown1") +
-    geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
-    theme_minimal() +
-    ylab("Temperature") + xlab("Date")+
-    scale_y_continuous(limits = c(-20, 35))+
-    ggtitle(i) -> GG
-  print(GG)
   
+  temp <- df %>% filter(site == i)
+  
+  if(length(na.omit(unique(temp$tomst_id))) > 1){
+    
+    for(ii in na.omit(unique(temp$tomst_id))){
+      temp %>% 
+        filter(tomst_id == ii) %>% 
+        #group_by(date) %>% 
+        #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
+        #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
+        ggplot(aes_string(x="datetime")) +
+        geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
+        geom_line(aes_string(y = "T2"), col = "brown1") +
+        geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
+        theme_minimal() +
+        ylab("Temperature") + xlab("Date")+
+        scale_y_continuous(limits = c(-20, 35))+
+        ggtitle(paste0(i,"_",ii)) -> GG
+      print(GG)
+    }
+    
+  } else {
+    temp %>% 
+      #group_by(date) %>% 
+      #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
+      #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
+      ggplot(aes_string(x="datetime")) +
+      geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
+      geom_line(aes_string(y = "T2"), col = "brown1") +
+      geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
+      theme_minimal() +
+      ylab("Temperature") + xlab("Date")+
+      scale_y_continuous(limits = c(-20, 35))+
+      ggtitle(i) -> GG
+    print(GG)
+  }
 }
 dev.off()
 
@@ -274,35 +305,71 @@ times <- seq(floor_date(as_date(min(df2$date)), "month"),
 
 # Plot each site month by month
 for(siteid in sites){
-  #siteid <- "AIL105"
+  # siteid <- "SAA1195"
   print(siteid)
   pdf(paste0("visuals/monthly_", siteid, ".pdf"), 10, 6)
-  for (tt in 1:(length(times) - 1)) {
+  temp <- df %>% filter(site == siteid)
+  
+  if(length(na.omit(unique(temp$tomst_id))) > 1){
     
-    df %>% filter(site == siteid) %>%
-      filter(datetime >= ymd(times[tt]),
-             datetime < ymd(times[tt + 1])) -> dft
-    
-    if(nrow(dft %>% filter(complete.cases(.)) > 0)){
-      dft %>%
-        ggplot(aes_string(x = "datetime")) +
-        geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
-        geom_line(aes_string(y = "T2"), col = "brown1") +
-        geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
-        theme_minimal() +
-        ylab("Temperature") + xlab("Date") +
-        ggtitle(paste("Site: ", siteid, "; Time: ", times[tt])) +
-        scale_x_datetime(date_minor_breaks = "1 day") -> GG1
+    for(ii in na.omit(unique(temp$tomst_id))){
       
-      dft %>%
-        ggplot(aes_string(x = "datetime")) +
-        geom_line(aes_string(y = "moist"), col = "blue") +
-        theme_minimal() +
-        ylab("Moisture") + xlab("Date") +
-        ggtitle(paste("Site: ", siteid, "; Time: ", times[tt])) +
-        scale_x_datetime(date_minor_breaks = "1 day") -> GG2
+      for (tt in 1:(length(times) - 1)) {
+        temp %>% filter(tomst_id == ii) %>%
+          filter(datetime >= ymd(times[tt]),
+                 datetime < ymd(times[tt + 1])) -> dft
+        
+        if(nrow(dft %>% filter(complete.cases(.)) > 0)){
+          dft %>%
+            ggplot(aes_string(x = "datetime")) +
+            geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
+            geom_line(aes_string(y = "T2"), col = "brown1") +
+            geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
+            theme_minimal() +
+            ylab("Temperature") + xlab("Date") +
+            ggtitle(paste("Site: ", siteid, "; Tomst: ", ii, "; Time: ", times[tt])) +
+            scale_x_datetime(date_minor_breaks = "1 day") -> GG1
+          
+          dft %>%
+            ggplot(aes_string(x = "datetime")) +
+            geom_line(aes_string(y = "moist"), col = "blue") +
+            theme_minimal() +
+            ylab("Moisture") + xlab("Date") +
+            ggtitle(paste("Site: ", siteid, "; Time: ", times[tt])) +
+            scale_x_datetime(date_minor_breaks = "1 day") -> GG2
+          
+          print(plot_grid(plotlist = list(GG1, GG2), nrow = 2))
+        }
+      }
+    }
+  } else {
+    for (tt in 1:(length(times) - 1)) {
       
-      print(plot_grid(plotlist = list(GG1, GG2), nrow = 2))
+      temp %>% 
+        filter(datetime >= ymd(times[tt]),
+               datetime < ymd(times[tt + 1])) -> dft
+      
+      if(nrow(dft %>% filter(complete.cases(.)) > 0)){
+        dft %>%
+          ggplot(aes_string(x = "datetime")) +
+          geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
+          geom_line(aes_string(y = "T2"), col = "brown1") +
+          geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
+          theme_minimal() +
+          ylab("Temperature") + xlab("Date") +
+          ggtitle(paste("Site: ", siteid, "; Time: ", times[tt])) +
+          scale_x_datetime(date_minor_breaks = "1 day") -> GG1
+        
+        dft %>%
+          ggplot(aes_string(x = "datetime")) +
+          geom_line(aes_string(y = "moist"), col = "blue") +
+          theme_minimal() +
+          ylab("Moisture") + xlab("Date") +
+          ggtitle(paste("Site: ", siteid, "; Time: ", times[tt])) +
+          scale_x_datetime(date_minor_breaks = "1 day") -> GG2
+        
+        print(plot_grid(plotlist = list(GG1, GG2), nrow = 2))
+      }
     }
   }
   dev.off()
@@ -525,7 +592,7 @@ df2 %>% mutate(probl = ifelse(site == siteid &
 siteid <- 15
 
 office <- c(as_date(as_date(min(df$datetime)):as_date("2019-07-09")))
-probls <- c(as_date(as_date("2022-07-12"):as_date("2021-09-29")))
+probls <- c(as_date(as_date("2022-07-12"):as_date("2022-09-29")))
 hattu <- c()
 
 df2 %>% mutate(probl = ifelse(site == siteid &
@@ -951,7 +1018,7 @@ siteid <- 42
 office <- c(as_date(as_date(min(df$datetime)):as_date("2021-07-03")))
 probls <- c()
 hattu <- c()
-T2T3moisterror <- c(as_date(as_date("2021-07-09"):as_date("2022-09-29")))
+T2T3moisterror <- c(as_date(as_date("2021-07-09"):as_date("2022-10-02")))
 
 df2 %>% mutate(probl = ifelse(site == siteid &
                                 date %in% office,
@@ -1155,11 +1222,20 @@ df2 %>% mutate(probl = ifelse(site == siteid &
 
 ########################################################################
 # FILL MISSING TIMESTAMPS WITH NA
+
+df2 <- df2 %>% 
+  mutate(site_id = paste0(site, "_", tomst_id))
+df <- df %>% 
+  mutate(site_id = paste0(site, "_", tomst_id))
+
+sites2 <- unique(df$site_id)
+sites2 <- sites2[!grepl("_NA", sites2)]
+
 df3 <- data.frame()
-for(i in unique(df$site)){
-  #i <- 6
+for(i in sites2){
+  #i <- "AIL152_94194008"
   
-  df %>% filter(site == i) -> temp
+  df %>% filter(site_id == i) -> temp
   
   temp %>% mutate(timediff = as.numeric(datetime - lag(datetime))) -> temp
   temp[1,"timediff"] <- 15
@@ -1192,11 +1268,11 @@ for(i in unique(df$site)){
     }
     
     missingdf <- data.frame(datetime = ymd_hms(missingt),
-                            site = i)
+                            site_id = i)
     
     print(NROW(missingdf))
     
-    temp %>% full_join(., missingdf) %>% 
+    temp %>% full_join(., missingdf, by = c("datetime", "site_id")) %>% 
       arrange(datetime) %>% 
       select(-timediff) -> temp
     
@@ -1208,31 +1284,20 @@ for(i in unique(df$site)){
     
     df3 <- bind_rows(df3, temp)
   }
-  
 }
 
 #################################################################################
 # CORRECT BIASES BASED ON THE NOT-IN-FIELD DATA
 #
-dfc <- df3 %>% 
-  mutate(siteid = paste0(site, "_", tomst_id))
-
-df2 <- df2 %>% 
-  mutate(siteid = paste0(site, "_", tomst_id))
-df <- df %>% 
-  mutate(siteid = paste0(site, "_", tomst_id))
-
-sites2 <- unique(dfc$siteid)
-sites2 <- sites2[!grepl("_NA", sites2)]
 
 diffs_all <- data.frame()
 for(i in sites2){
-  # i <- "39_94194299"
-  office <- df2 %>% filter(siteid == i) %>% 
+  # i <- "2_94194338"
+  office <- df2 %>% filter(site_id == i) %>% 
     filter(probl == 2) %>% pull(date)
   office <- office[-which(office == max(office))]
   
-  df %>% filter(siteid == i) %>%
+  df %>% filter(site_id == i) %>%
     mutate(date = as_date(datetime)) %>% 
     filter(date %in% office) %>% 
     mutate(change1a = abs(T3 - lag(T3,1)),
@@ -1259,15 +1324,15 @@ for(i in sites2){
   
   diffs <- round(means - median(means),4)
   
-  dfc %>% mutate(T1 = ifelse(siteid == i,T1 - diffs["T1"],T1),
-                 T2 = ifelse(siteid == i,T2 - diffs["T2"],T2),
-                 T3 = ifelse(siteid == i,T3 - diffs["T3"],T3)) -> dfc
+  df3 %>% mutate(T1 = ifelse(site_id == i,T1 - diffs["T1"],T1),
+                 T2 = ifelse(site_id == i,T2 - diffs["T2"],T2),
+                 T3 = ifelse(site_id == i,T3 - diffs["T3"],T3)) -> df3
   
   print(i)
   print(diffs)
   
   diffs_all <- bind_rows(diffs_all,
-                         bind_cols(data.frame(siteid = i), 
+                         bind_cols(data.frame(site_id = i), 
                                    as.data.frame(t(as.data.frame(diffs)))))
   
 }
@@ -1278,21 +1343,21 @@ fwrite(diffs_all, "output/Correction_temperatures.csv")
 # Delete erroneous data
 #
 
-dfc %>% mutate(date = as_date(datetime)) %>%
+df3 %>% mutate(date = as_date(datetime)) %>%
   left_join(., df2 %>% select(site, date, probl)) %>% 
-  filter(probl != 2) -> dfc
+  filter(probl != 2) -> df3
 
-dfc %>% mutate(h = hour(datetime)) %>% 
+df3 %>% mutate(h = hour(datetime)) %>% 
   group_by(site, date) %>% 
   summarise(nh = length(unique(h))) %>% 
   filter(nh != 24) -> missh
 
-dfc %>% left_join(., missh) %>% 
+df3 %>% left_join(., missh) %>% 
   mutate(T1 = replace(T1, !is.na(nh), NA),
          T2 = replace(T2, !is.na(nh), NA),
          T3 = replace(T3, !is.na(nh), NA),
          moist = replace(moist, !is.na(nh), NA)) %>%
-  select(-nh,-zone) -> dfc
+  select(-nh,-zone) -> df3
 
 ##############################################################
 # DETECT ANOMALIES CROSS-RELATING THE SITES
@@ -1323,15 +1388,15 @@ my_mean = function(x) {
   }
 }
 
-dfc %>% mutate(my = paste0(year(date),"_",month(date))) -> dfc
+df3 %>% mutate(my = paste0(year(date),"_",month(date))) -> df3
 
 dfall <- data.frame()
 pdf("visuals/Temperature_graphs_spikes.pdf", 10, 12)
-for(i in sites[1]){
+for(i in sites){
   #i <- 12
   
   print(i)
-  dfc %>% filter(site == i) %>%
+  df3 %>% filter(site == i) %>%
     filter(probl != 1) %>%
     mutate(timediff1 = as.numeric(datetime - lag(datetime)),
            timediff2 = as.numeric(lead(datetime) - datetime)) %>%
@@ -1362,7 +1427,7 @@ for(i in sites[1]){
       
       # Cross correlate site to others and extract the site with highest correlation
       temp1 %>%
-        left_join(., dfc, by = "datetime") %>%
+        left_join(., df3, by = "datetime") %>%
         filter(site != i) %>%
         mutate(T1 = ifelse(probl %in% c(0,3,5:8), T1, NA)) %>% 
         arrange(site, datetime) %>% 
@@ -1372,7 +1437,7 @@ for(i in sites[1]){
         slice(1) %>% pull(site) -> site_to_compare
       
       temp1 %>%
-        left_join(., dfc %>% filter(site == site_to_compare), by = "datetime") %>%
+        left_join(., df3 %>% filter(site == site_to_compare), by = "datetime") %>%
         select(datetime, T1f, T1) %>% 
         mutate(me = T1f-T1) %>%
         mutate(lag_T1 = me - lag(me)) %>%
@@ -1437,7 +1502,7 @@ for(i in sites[1]){
     # T2
     
     temp %>% filter(my == ii) %>%
-      filter(probl %in% c(0,3,4:6)) %>% 
+      filter(probl %in% c(0,3,4:6,9)) %>% 
       select(datetime, T2, site) %>%
       filter(complete.cases(.)) %>%
       rename(T2f = T2,
@@ -1447,9 +1512,9 @@ for(i in sites[1]){
       
       # Cross correlate site to others and extract the site with highest correlation
       temp2 %>%
-        left_join(., dfc, by = "datetime") %>%
+        left_join(., df3, by = "datetime") %>%
         filter(site != i) %>%
-        mutate(T2 = ifelse(probl %in% c(0,3,4:6), T2, NA)) %>% 
+        mutate(T2 = ifelse(probl %in% c(0,3,4:6,9), T2, NA)) %>% 
         arrange(site, datetime) %>% 
         group_by(site) %>% 
         summarise(cor = cor(T2f, T2)) %>% 
@@ -1457,7 +1522,7 @@ for(i in sites[1]){
         slice(1) %>% pull(site) -> site_to_compare
       
       temp2 %>%
-        left_join(., dfc %>% filter(site == site_to_compare), by = "datetime") %>%
+        left_join(., df3 %>% filter(site == site_to_compare), by = "datetime") %>%
         select(datetime, T2f, T2) %>% 
         mutate(me = T2f-T2) %>%
         mutate(lag_T2 = me - lag(me)) %>%
@@ -1524,7 +1589,7 @@ for(i in sites[1]){
     # T3
     
     temp %>% filter(my == ii) %>%
-      filter(probl %in% c(0,6)) %>% 
+      filter(probl %in% c(0,6,9)) %>% 
       select(datetime, T3, site) %>%
       filter(complete.cases(.)) %>%
       rename(T3f = T3,
@@ -1534,9 +1599,9 @@ for(i in sites[1]){
       
       # Cross correlate site to others and extract the site with highest correlation
       temp3 %>%
-        left_join(., dfc, by = "datetime") %>%
+        left_join(., df3, by = "datetime") %>%
         filter(site != i) %>%
-        mutate(T3 = ifelse(probl %in% c(0,3,6), T3, NA)) %>% 
+        mutate(T3 = ifelse(probl %in% c(0,3,6,9), T3, NA)) %>% 
         arrange(site, datetime) %>% 
         group_by(site) %>% 
         summarise(cor = cor(T3f, T3)) %>% 
@@ -1544,7 +1609,7 @@ for(i in sites[1]){
         slice(1) %>% pull(site) -> site_to_compare
       
       temp3 %>%
-        left_join(., dfc %>% filter(site == site_to_compare), by = "datetime") %>%
+        left_join(., df3 %>% filter(site == site_to_compare), by = "datetime") %>%
         select(datetime, T3f, T3) %>% 
         mutate(me = T3f-T3) %>%
         mutate(lag_T3 = me - lag(me)) %>%
@@ -1631,72 +1696,52 @@ dev.off()
 # MASK IMPOSSIBLE VALUES
 
 dfall %>% mutate(T1 = ifelse(T1 < (-50) | T1 > 50, NA, T1),
-              T2 = ifelse(T2 < (-50) | T2 > 50, NA, T2),
-              T3 = ifelse(T3 < (-50) | T3 > 50, NA, T3),
-              moist = ifelse(moist < 200, NA, moist)) -> dfall
+                 T2 = ifelse(T2 < (-50) | T2 > 50, NA, T2),
+                 T3 = ifelse(T3 < (-50) | T3 > 50, NA, T3),
+                 moist = ifelse(moist < 200 | moist >= 4096, NA, moist)) -> dfall
 
 
 ###############################################################################
 # PLOT CORRECTED
 
-if(!"dfall" %in% ls()){
+
+pdf("visuals/Temperature_graphs_corrected.pdf", 12, 10)
+for(i in sites){
+  #i <- "L12
+  print(i)
+  dfall %>% filter(site == i) %>% 
+    mutate(T1 = as.numeric(ifelse(probl %in% c(1,4,9), NA, T1))) %>% 
+    mutate(T2 = as.numeric(ifelse(probl %in% c(1,7,8), NA, T2))) %>% 
+    mutate(T3 = as.numeric(ifelse(probl %in% c(1,4,5,7,8), NA, T3))) %>% 
+    #group_by(date) %>% 
+    #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
+    #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
+    ggplot(aes_string(x="datetime")) +
+    geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
+    geom_line(aes_string(y = "T2"), col = "brown1") +
+    geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
+    theme_minimal() +
+    ylab("Temperature") + xlab("Date")+
+    scale_y_continuous(limits = c(-20, 35))+
+    ggtitle(i) -> GG1
   
-  dfall <- dfc; rm(dfc)
+  dfall %>% filter(site == i) %>% 
+    mutate(moist = as.numeric(ifelse(probl %in% c(1,6,8,9), NA, moist))) %>% 
+    mutate(moist = as.numeric(ifelse(T1 <= 1, NA, moist))) %>% 
+    #group_by(date) %>% 
+    #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
+    #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
+    ggplot(aes_string(x="datetime")) +
+    geom_line(aes_string(y = "moist"), col = "black") +
+    theme_minimal() +
+    ylab("Soil moisture count") + xlab("Date")+
+    scale_y_continuous(limits = c(500, 4000))+
+    ggtitle(i) -> GG2
   
-  pdf("visuals/Temperature_graphs_corrected.pdf", 10, 5)
-  for(i in sites){
-    #i <- sites[1]
-    print(i)
-    dfall %>% filter(site == i) %>% 
-      mutate(across(T1:T3, ~ifelse(probl == 1, NA, .x))) %>% 
-      mutate(across(c(T1,T3), ~ifelse(probl == 4, NA, .x))) %>% 
-      mutate(T3 = ifelse(probl == 3, NA, T3)) %>% 
-      #group_by(date) %>% 
-      #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
-      #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
-      ggplot(aes_string(x="datetime")) +
-      geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
-      geom_line(aes_string(y = "T2"), col = "brown1") +
-      geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
-      theme_minimal() +
-      ylab("Temperature") + xlab("Date")+
-      scale_y_continuous(limits = c(-20, 35))+
-      ggtitle(i) -> GG
-    print(GG)
-    
-  }
-  dev.off()
+  print(plot_grid(plotlist = list(GG1, GG2), nrow = 2))
   
-} else {
-  
-  pdf("visuals/Temperature_graphs_corrected.pdf", 10, 5)
-  for(i in sites){
-    #i <- 104
-    print(i)
-    dfall %>% filter(site == i) %>% 
-      mutate(across(T1:T3, ~ifelse(probl == 1, NA, .x))) %>% 
-      mutate(across(c(T1,T3), ~ifelse(probl == 4, NA, .x))) %>% 
-      mutate(T3 = ifelse(probl == 3, NA, T3)) %>% 
-      #group_by(date) %>% 
-      #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
-      #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
-      ggplot(aes_string(x="datetime")) +
-      geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
-      geom_line(aes_string(y = "T2"), col = "brown1") +
-      geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
-      theme_minimal() +
-      ylab("Temperature") + xlab("Date")+
-      scale_y_continuous(limits = c(-20, 35))+
-      ggtitle(i) -> GG
-    print(GG)
-    
-  }
-  dev.off()
-  
-  dfall %>% 
-    bind_rows(., dfc %>% select(-my) %>% filter(probl == 1)) %>% 
-    arrange(site, datetime) -> dfall
 }
+dev.off()
 
 
 round2 <- function(x) round(x,2)
