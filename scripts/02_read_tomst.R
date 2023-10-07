@@ -8,17 +8,8 @@ library(zoo)
 mind <- as.Date("2018-06-01", tz = "Etc/GMT-2")
 maxd <- as.Date("2022-10-10", tz = "Etc/GMT-2")
 
-raw_data_dir <- "/scratch/project_2003061/microclim/Varrio2022"
+raw_data_dir <- "/scratch/project_2007415/microclim/Varrio2022"
 # raw_data_dir <- "C:/Users/OMISTAJA/OneDrive - University of Helsinki/Kesä2022/Varrio2022"
-
-#################################################################################3
-# Read year 2020 site visiting times
-
-maxdt20 <- read_csv("data/reading_times_2020.csv")%>%
-  mutate(maxdt = with_tz(maxdt, tzone = "Etc/GMT-2"))
-
-maxdt21 <- read_csv("data/reading_times_2021.csv") %>%
-  mutate(maxdt = with_tz(maxdt, tzone = "Etc/GMT-2"))
 
 
 # List logger data files to read
@@ -115,63 +106,11 @@ df %>% filter(datetime > mind,
 
 sites <- unique(df$site)
 
-# Replace the measurements of the time of the 2020 visiting with NA
-# as reading the logger may influence the measurements
-maxdt20 <- maxdt20 %>% group_by(site) %>% arrange(desc(maxdt)) %>% slice_head(n = 1) %>% ungroup()
-left_join(df, maxdt20 %>% select(-tomst_id) %>% mutate(visit = 1) %>% rename(datetime = maxdt)) %>% 
-  group_by(site, tomst_id) %>%
-  mutate(visit = rollapply(visit, width=3, FUN=sum, na.rm = T, 
-                           fill = NA, partial = T, align = "center")) %>% 
-  mutate(across(T1:moist, ~ifelse(visit == 0, ., NA))) %>%
-  select(-visit) -> df
-
-# Remove the measurements of the time of the 2021 visiting
-# as reading the logger may influence the measurements
-maxdt21 <- maxdt21 %>% group_by(site) %>% arrange(desc(maxdt)) %>% slice_head(n = 1) %>% ungroup()
-full_join(df, maxdt21 %>% select(-tomst_id) %>% mutate(visit = 1) %>% rename(datetime = maxdt)) %>% 
-  group_by(site, tomst_id) %>%
-  mutate(visit = rollapply(visit, width=3, FUN=sum, na.rm = T, 
-                           fill = NA, partial = T, align = "center")) %>% 
-  mutate(across(T1:moist, ~ifelse(visit == 0, ., NA))) %>%
-  select(-visit) -> df
-
-# Remove the measurements of the time of the 2022 visiting
-# as reading the logger may influence the measurements
-maxdt <- maxdt %>% group_by(site) %>% arrange(desc(maxdt)) %>% slice_head(n = 1) %>% ungroup()
-full_join(df, maxdt %>% select(-tomst_id) %>% mutate(visit = 1) %>% rename(datetime = maxdt)) %>% 
-  group_by(site, tomst_id) %>%
-  mutate(visit = rollapply(visit, width=3, FUN=sum, na.rm = T, 
-                           fill = NA, partial = T, align = "center")) %>% 
-  mutate(across(T1:moist, ~ifelse(visit == 0, ., NA))) %>%
-  select(-visit) -> df
-
-
 # Calculate different daily values for diagnostics
 df %>% mutate(date = as_date(datetime)) %>% 
   group_by(site,date,tomst_id) %>% 
-  mutate(roll_diff_T1 = T1 - lead(T1),
-         roll_diff_T2 = T2 - lead(T2),
-         roll_diff_T3 = T3 - lead(T3)) %>%
-  summarise(soil_sd = sd(T1),
-            air_sd = sd(T3),
-            soil_mean = mean(T1),
-            air_mean = mean(T3),
-            soil_min = min(T1),
-            soil_max = max(T1),
-            surf_max = max(T2),
-            air_max = max(T3),
-            mean_diff = mean(abs(T3-T1)),
-            moist = min(moist),
-            corr = cor(T1,T3, use = "pairwise.complete.obs"),
-            max_diff_T1 = max(roll_diff_T1, na.rm = T),
-            max_diff_T2 = max(roll_diff_T2, na.rm = T),
-            max_diff_T3 = max(roll_diff_T3, na.rm = T)) %>% 
-  mutate(sa_diff = air_mean-soil_mean,
-         sa_max_diff = air_max-soil_max,
-         ss_max_diff = surf_max-soil_max) %>% 
-  mutate(sd_ratio = soil_sd/air_sd) %>% 
-  mutate(sd_ratio = ifelse(soil_sd < 1, 0, sd_ratio)) %>% 
-  mutate(corr = ifelse(is.na(corr), 0, corr)) %>% 
+  summarise(soil_mean = mean(T1),
+            air_mean = mean(T3)) %>% 
   as.data.frame() -> df2
 
 # create column for error codes
@@ -180,123 +119,6 @@ df2 %>% mutate(probl = 0) -> df2
 ############################################################################
 # PLOTTINGS
 ############################################################################
-
-# Plot temperatures
-pdf("visuals/Temperature_graphs.pdf", 12, 5)
-for(i in sites){
-  # i <- "SAA895"
-  print(i)
-  
-  temp <- df %>% filter(site == i)
-  
-  if(length(na.omit(unique(temp$tomst_id))) > 1){
-    
-    for(ii in na.omit(unique(temp$tomst_id))){
-      temp %>% 
-        filter(tomst_id == ii) %>% 
-        #group_by(date) %>% 
-        #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
-        #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
-        ggplot(aes_string(x="datetime")) +
-        geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
-        geom_line(aes_string(y = "T2"), col = "brown1") +
-        geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
-        theme_minimal() +
-        ylab("Temperature") + xlab("Date")+
-        scale_y_continuous(limits = c(-20, 35))+
-        ggtitle(paste0(i,"_",ii)) -> GG
-      print(GG)
-    }
-    
-  } else {
-    temp %>% 
-      #group_by(date) %>% 
-      #summarise_at(vars(i, "soil"), funs(mean, min, max), na.rm = T) %>% 
-      #lapply(function(x) replace(x, is.infinite(x),NA)) %>% as_tibble() %>% 
-      ggplot(aes_string(x="datetime")) +
-      geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
-      geom_line(aes_string(y = "T2"), col = "brown1") +
-      geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
-      theme_minimal() +
-      ylab("Temperature") + xlab("Date")+
-      scale_y_continuous(limits = c(-20, 35))+
-      ggtitle(i) -> GG
-    print(GG)
-  }
-}
-dev.off()
-
-# pdf("visuals/Temperature_diagnose_graphs.pdf", 18, 11)
-# for(i in sites){
-#   print(i)
-#   df %>% filter(site == i) %>%
-#     ggplot(aes_string(x="datetime")) +
-#     geom_line(aes_string(y = "T3"), col = "cornflowerblue") +
-#     geom_line(aes_string(y = "T2"), col = "brown1") +
-#     geom_line(aes_string(y = "T1"), col = "darkgoldenrod") +
-#     theme_minimal() +
-#     ylab("Temperature") + xlab("Date")+
-#     scale_y_continuous(limits = c(-20, 35))+
-#     ggtitle(i) -> GG1
-#   
-#   df2 %>% filter(site == i) %>%
-#     ggplot(aes_string(x="date")) +
-#     geom_line(aes_string(y = "air_sd"), col = "cornflowerblue") +
-#     geom_line(aes_string(y = "soil_sd"), col = "darkgoldenrod") +
-#     theme_minimal() +
-#     ylab("Temperature SD") + xlab("Date") -> GG2
-#   
-#   df2 %>% filter(site == i) %>%
-#     ggplot(aes_string(x="date")) +
-#     geom_line(aes_string(y = "sd_ratio"), col = "black") +
-#     theme_minimal() +
-#     ylab("SD ratio") + xlab("Date") -> GG3
-#   
-#   df2 %>% filter(site == i) %>%
-#     ggplot(aes_string(x="date")) +
-#     geom_line(aes_string(y = "air_mean"), col = "cornflowerblue") +
-#     geom_line(aes_string(y = "soil_mean"), col = "darkgoldenrod") +
-#     geom_line(aes_string(y = "air_max"), col = "cornflowerblue") +
-#     geom_line(aes_string(y = "surf_max"), col = "brown1") +
-#     geom_line(aes_string(y = "soil_max"), col = "darkgoldenrod") +
-#     theme_minimal() +
-#     ylab("Temperature mean + max") + xlab("Date")+
-#     scale_y_continuous(limits = c(-25, 40))-> GG4
-#   
-#   df2 %>% filter(site == i) %>%
-#     ggplot(aes_string(x="date")) +
-#     geom_line(aes_string(y = "corr")) +
-#     theme_minimal() +
-#     ylab("Air - soil correlation") + xlab("Date")+
-#     scale_y_continuous(limits = c(-1, 1)) -> GG5
-#   
-#   df2 %>% filter(site == i) %>%
-#     ggplot(aes_string(x="date")) +
-#     geom_line(aes_string(y = "max_diff_T3"), col = "cornflowerblue") +
-#     geom_line(aes_string(y = "max_diff_T2"), col = "brown1") +
-#     geom_line(aes_string(y = "max_diff_T1"), col = "darkgoldenrod") +
-#     theme_minimal() +
-#     ylab("rolling diffs") + xlab("Date") -> GG6
-#   
-#   df2 %>% filter(site == i) %>%
-#     ggplot(aes_string(x="date")) +
-#     geom_line(aes_string(y = "sa_diff"), col = "cornflowerblue") +
-#     geom_line(aes_string(y = "sa_max_diff"), col = "brown1") +
-#     geom_line(aes_string(y = "ss_max_diff"), col = "darkgoldenrod") +
-#     theme_minimal() +
-#     ylab("Differences between") + xlab("Date") -> GG7
-#   
-#   df2 %>% filter(site == i) %>%
-#     ggplot(aes_string(x="date")) +
-#     geom_line(aes_string(y = "moist"), col = "black") +
-#     theme_minimal() +
-#     ylab("moisture") + xlab("Date") -> GG8
-#   
-#   print(plot_grid(plotlist = list(GG1,GG2,GG3,GG4,GG5,GG6,GG7,GG8), nrow = 4))
-# }
-# dev.off()
-
-###################################################################################################################
 
 # Months to plot
 times <- seq(floor_date(as_date(min(df2$date)), "month"),
@@ -1233,7 +1055,7 @@ sites2 <- sites2[!grepl("_NA", sites2)]
 
 df3 <- data.frame()
 for(i in sites2){
-  #i <- "AIL152_94194008"
+  #i <- "35_94194421"
   
   df %>% filter(site_id == i) -> temp
   
@@ -1287,7 +1109,7 @@ for(i in sites2){
 }
 
 #################################################################################
-# CORRECT BIASES BASED ON THE NOT-IN-FIELD DATA
+# CALCULATE BIASES BASED ON THE NOT-IN-FIELD DATA
 #
 
 diffs_all <- data.frame()
@@ -1324,392 +1146,67 @@ for(i in sites2){
   
   diffs <- round(means - median(means),4)
   
-  df3 %>% mutate(T1 = ifelse(site_id == i,T1 - diffs["T1"],T1),
-                 T2 = ifelse(site_id == i,T2 - diffs["T2"],T2),
-                 T3 = ifelse(site_id == i,T3 - diffs["T3"],T3)) -> df3
-  
   print(i)
   print(diffs)
   
   diffs_all <- bind_rows(diffs_all,
                          bind_cols(data.frame(site_id = i), 
                                    as.data.frame(t(as.data.frame(diffs)))))
-  
 }
 
 fwrite(diffs_all, "output/Correction_temperatures.csv")
 
 ###################################################################################
+# Write out a error log
+
+elog <- df2 %>% 
+  mutate(runid = rleid(probl)) %>% 
+  group_by(site, tomst_id, runid) %>% 
+  summarise(start_date = min(date),
+            end_date = max(date),
+            probl = max(probl)) %>% 
+  filter(probl != 0)
+
+elog %>% write_csv("output/error_log.csv")
+
+###################################################################################
 # Delete erroneous data
 #
 
+# Delete not in field data
 df3 %>% mutate(date = as_date(datetime)) %>%
   left_join(., df2 %>% select(site, date, probl)) %>% 
   filter(probl != 2) -> df3
 
-df3 %>% mutate(h = hour(datetime)) %>% 
-  group_by(site, date) %>% 
-  summarise(nh = length(unique(h))) %>% 
-  filter(nh != 24) -> missh
+# Look for weird extra measurements between real ones
+df3 <- df3 %>% 
+  mutate(mins = minute(datetime))
 
-df3 %>% left_join(., missh) %>% 
-  mutate(T1 = replace(T1, !is.na(nh), NA),
-         T2 = replace(T2, !is.na(nh), NA),
-         T3 = replace(T3, !is.na(nh), NA),
-         moist = replace(moist, !is.na(nh), NA)) %>%
-  select(-nh,-zone) -> df3
-
-##############################################################
-# DETECT ANOMALIES CROSS-RELATING THE SITES
-
-my_sd = function(x) {
-  if(length(x) %% 2 == 0L) { return(sd(x, na.rm = T)) }
-  if(length(x) %% 2 == 1L) { if(length(x) == 3){
-    return(sd(x[-ceiling(0.5*length(x))]))
-  } else {
-    mid <- ceiling(0.5*length(x))
-    return(sd(x[-c(mid-1, mid, mid+1)], na.rm = T))
-  }  }
-}
-my_mean = function(x) {
-  if(length(x) %% 2 == 0L) { return(mean(x)) }
-  if(length(x) %% 2 == 1L) {
-    if(length(x) == 3){
-      return(mean(x[-ceiling(0.5*length(x))]))
-    } else {
-      if(length(x) == 5){
-        mid <- ceiling(0.5*length(x))
-        return(mean(x[-c(mid-1, mid, mid+1)]))
-      } else {
-        mid <- ceiling(0.5*length(x))
-        return(mean(x[-c(mid-2, mid-1, mid, mid+1, mid+2)]))
-      }
-    }
-  }
-}
-
-df3 %>% mutate(my = paste0(year(date),"_",month(date))) -> df3
-
-dfall <- data.frame()
-pdf("visuals/Temperature_graphs_spikes.pdf", 10, 12)
-for(i in sites){
-  #i <- 12
-  
+for(i in unique(df3$site_id)){
   print(i)
-  df3 %>% filter(site == i) %>%
-    filter(probl != 1) %>%
-    mutate(timediff1 = as.numeric(datetime - lag(datetime)),
-           timediff2 = as.numeric(lead(datetime) - datetime)) %>%
-    filter(timediff1 %in% c(10,15)|timediff2 %in% c(10,15)) %>%
-    mutate(timediff1 = as.numeric(datetime - lag(datetime)),
-           timediff2 = as.numeric(lead(datetime) - datetime)) -> temp
   
-  if(temp %>% pull(timediff1) %>% min(., na.rm = T) < 10){
-    temp %>% filter(timediff1 + timediff2 >= 20 | is.na(timediff1 + timediff2)) -> temp
+  td <- df3 %>% 
+    filter(site_id == i)
+  
+  tb <- table(td$mins)/nrow(td)
+  tb <- tb[tb < 0.0001]
+  if(sum(tb)*nrow(td) > 0){
+    print(paste0("Removing ", sum(tb)*nrow(td), " rows..."))
   }
   
-  dftemp <- data.frame()
-  for(ii in unique(temp$my)){
-    # ii <- "2019_9"
-    print(ii)
-    
-    ####################################
-    # T1
-    
-    temp %>% filter(my == ii) %>%
-      filter(probl %in% c(0,3,5:8)) %>% 
-      select(datetime, T1, site) %>%
-      filter(complete.cases(.)) %>%
-      rename(T1f = T1,
-             site2 = site) -> temp1
-    
-    if(length(unique(as_date(temp1$datetime))) > 3 & NROW(temp1) > 100){
-      
-      # Cross correlate site to others and extract the site with highest correlation
-      temp1 %>%
-        left_join(., df3, by = "datetime") %>%
-        filter(site != i) %>%
-        mutate(T1 = ifelse(probl %in% c(0,3,5:8), T1, NA)) %>% 
-        arrange(site, datetime) %>% 
-        group_by(site) %>% 
-        summarise(cor = cor(T1f, T1)) %>% 
-        arrange(desc(cor)) %>% 
-        slice(1) %>% pull(site) -> site_to_compare
-      
-      temp1 %>%
-        left_join(., df3 %>% filter(site == site_to_compare), by = "datetime") %>%
-        select(datetime, T1f, T1) %>% 
-        mutate(me = T1f-T1) %>%
-        mutate(lag_T1 = me - lag(me)) %>%
-        mutate(lead_T1 = me - lead(me)) %>%
-        mutate(lag_T1f = T1f - lag(T1f)) %>%
-        mutate(lead_T1f = T1f - lead(T1f)) %>%
-        rowwise() %>% mutate(diff = sum(c(abs(lag_T1),abs(lead_T1)), na.rm = T),
-                             change = sum(c(abs(lag_T1f),abs(lead_T1f)), na.rm = T)) %>% 
-        ungroup() %>% 
-        mutate(roll_diff = rollapply(diff, width=48*3, FUN=my_mean, fill = NA, partial = T, align = "center")+0.001,
-               change_diff = rollapply(change, width=48*3, FUN=my_mean, fill = NA, partial = T, align = "center")+0.001) %>% 
-        mutate(rel_diff = diff/roll_diff,
-               rel_change = change/change_diff) %>%
-        mutate(rel_lag_T1f = lag_T1f/change_diff,
-               rel_lead_T1f = lead_T1f/change_diff) %>%
-        mutate(error = ifelse((rel_diff > 10 & rel_change > 10 & rel_lag_T1f > 10 & rel_lead_T1f > 5), 1, 0)) %>% 
-        mutate(error = ifelse((rel_diff > 10 & rel_change > 10 & rel_lag_T1f < (-10) & rel_lead_T1f < (-5)), 1, error)) %>% 
-        mutate(error = ifelse((rel_diff > 20 & rel_change > 20 & rel_lag_T1f > 10), 1, error)) %>%
-        mutate(error = ifelse((rel_diff > 20 & rel_change > 20 & rel_lead_T1f < (-10)), 1, error)) %>%
-        mutate(error = ifelse((lag_T1f > 3 & lead_T1f > 3), 1, error)) %>% 
-        mutate(error = ifelse((lag_T1f < (-3) & lead_T1f < (-3)), 1, error)) %>% 
-        mutate(error = ifelse((diff < 1), 0, error)) %>%
-        mutate(error = ifelse((diff > 20 | change > 20), 1, error)) %>%
-        mutate(error = error + lag(error,1) + lag(error,2) + lag(error,3) + lag(error,4) + lead(error)) %>%
-        mutate(error = ifelse(error > 1, 1, error)) %>%
-        mutate(T1c = ifelse(!is.na(error) & error == 1, NA, T1f)) %>% 
-        mutate(me = ifelse(!is.na(error) & error == 1, NA, me)) %>% 
-        mutate(fill = rollapply(me, width=11, FUN=mean, na.rm = T, fill = NA, partial = T, align = "center") + T1) %>% 
-        mutate(T1c = ifelse(is.na(T1c) & !is.na(error) & error == 1, fill, T1c)) -> temp1
-      
-      temp1 %>% 
-        mutate(error = as.numeric(ifelse(error == 1, 0, NA))) %>% 
-        ggplot(aes_string(x="datetime")) +
-        geom_line(aes(y = T1f), col = "cornflowerblue") +
-        geom_point(aes(y = error), col = "black") +
-        theme_minimal() +
-        ylab("T1") + xlab("Date")+
-        scale_y_continuous(limits = c(ifelse(min(temp1$T1f, na.rm = T) > 0, (-0.1), min(temp1$T1f, na.rm = T)),
-                                      ifelse(max(temp1$T1f, na.rm = T) < 0, 0.1, max(temp1$T1f, na.rm = T)))) +
-        ggtitle(paste(i, ii)) -> GG1
-      
-      temp1 %>% 
-        mutate(error = as.numeric(ifelse(error == 1, 0, NA))) %>% 
-        ggplot(aes_string(x="datetime")) +
-        geom_line(aes(y = T1c), col = "brown1") +
-        geom_point(aes(y = error), col = "black") +
-        theme_minimal() +
-        ylab("T1 corrected") + xlab("Date")+
-        scale_y_continuous(limits = c(ifelse(min(temp1$T1f, na.rm = T) > 0, (-0.1), min(temp1$T1f, na.rm = T)),
-                                      ifelse(max(temp1$T1f, na.rm = T) < 0, 0.1, max(temp1$T1f, na.rm = T)))) +
-        ggtitle(paste(i, ii)) -> GG2
-      
-    } else {
-      temp1 %>% mutate(T1c = T1f) -> temp1
-      
-      temp1 %>% ggplot(aes_string(x="datetime")) +
-        theme_minimal() +
-        ggtitle(paste(i, ii, ", no correction")) -> GG1 -> GG2
-    }
-    
-    ####################################
-    # T2
-    
-    temp %>% filter(my == ii) %>%
-      filter(probl %in% c(0,3,4:6,9)) %>% 
-      select(datetime, T2, site) %>%
-      filter(complete.cases(.)) %>%
-      rename(T2f = T2,
-             site2 = site) -> temp2
-    
-    if(length(unique(as_date(temp2$datetime))) > 3 & NROW(temp2) > 100){
-      
-      # Cross correlate site to others and extract the site with highest correlation
-      temp2 %>%
-        left_join(., df3, by = "datetime") %>%
-        filter(site != i) %>%
-        mutate(T2 = ifelse(probl %in% c(0,3,4:6,9), T2, NA)) %>% 
-        arrange(site, datetime) %>% 
-        group_by(site) %>% 
-        summarise(cor = cor(T2f, T2)) %>% 
-        arrange(desc(cor)) %>% 
-        slice(1) %>% pull(site) -> site_to_compare
-      
-      temp2 %>%
-        left_join(., df3 %>% filter(site == site_to_compare), by = "datetime") %>%
-        select(datetime, T2f, T2) %>% 
-        mutate(me = T2f-T2) %>%
-        mutate(lag_T2 = me - lag(me)) %>%
-        mutate(lead_T2 = me - lead(me)) %>%
-        mutate(lag_T2f = T2f - lag(T2f)) %>%
-        mutate(lead_T2f = T2f - lead(T2f)) %>%
-        rowwise() %>% mutate(diff = sum(c(abs(lag_T2),abs(lead_T2)), na.rm = T),
-                             change = sum(c(abs(lag_T2f),abs(lead_T2f)), na.rm = T)) %>% 
-        ungroup() %>% 
-        mutate(roll_diff = rollapply(diff, width=48*3, FUN=my_mean, fill = NA, partial = T, align = "center")+0.001,
-               change_diff = rollapply(change, width=48*3, FUN=my_mean, fill = NA, partial = T, align = "center")+0.001) %>% 
-        mutate(rel_diff = diff/roll_diff,
-               rel_change = change/change_diff) %>%
-        mutate(rel_lag_T2f = lag_T2f/change_diff,
-               rel_lead_T2f = lead_T2f/change_diff) %>%
-        mutate(error = ifelse((rel_diff > 10 & rel_change > 10 & rel_lag_T2f > 10 & rel_lead_T2f > 5), 1, 0)) %>% 
-        mutate(error = ifelse((rel_diff > 10 & rel_change > 10 & rel_lag_T2f < (-10) & rel_lead_T2f < (-5)), 1, error)) %>% 
-        mutate(error = ifelse((rel_diff > 15 & rel_change > 15 & rel_lag_T2f > 7 & rel_lead_T2f > 5), 1, 0)) %>% 
-        mutate(error = ifelse((rel_diff > 15 & rel_change > 15 & rel_lag_T2f < (-7) & rel_lead_T2f < (-5)), 1, error)) %>% 
-        mutate(error = ifelse((rel_diff > 20 & rel_change > 20 & rel_lag_T2f > 10), 1, error)) %>%
-        mutate(error = ifelse((rel_diff > 20 & rel_change > 20 & rel_lead_T2f < (-10)), 1, error)) %>%
-        mutate(error = ifelse((lag_T2f > 5 & lead_T2f > 5), 1, error)) %>% 
-        mutate(error = ifelse((lag_T2f < (-5) & lead_T2f < (-5)), 1, error)) %>% 
-        mutate(error = ifelse((diff < 1), 0, error)) %>%
-        mutate(error = ifelse((diff > 20 | change > 20), 1, error)) %>%
-        mutate(error = error + lag(error,1) + lag(error,2) + lag(error,3) + lag(error,4) + lead(error)) %>%
-        mutate(error = ifelse(error > 1, 1, error)) %>%
-        mutate(T2c = ifelse(!is.na(error) & error == 1, NA, T2f)) %>% 
-        mutate(me = ifelse(!is.na(error) & error == 1, NA, me)) %>% 
-        mutate(fill = rollapply(me, width=11, FUN=mean, na.rm = T, fill = NA, partial = T, align = "center") + T2) %>% 
-        mutate(T2c = ifelse(is.na(T2c) & !is.na(error) & error == 1, fill, T2c)) -> temp2
-      # edit(temp2 %>% mutate(datetime = as.character(datetime)))
-      temp2 %>% 
-        mutate(error = as.numeric(ifelse(error == 1, 0, NA))) %>% 
-        ggplot(aes_string(x="datetime")) +
-        geom_line(aes(y = T2f), col = "cornflowerblue") +
-        geom_point(aes(y = error), col = "black") +
-        theme_minimal() +
-        ylab("T2") + xlab("Date")+
-        scale_y_continuous(limits = c(ifelse(min(temp2$T2f, na.rm = T) > 0, (-0.1), min(temp2$T2f, na.rm = T)),
-                                      ifelse(max(temp2$T2f, na.rm = T) < 0, 0.1, max(temp2$T2f, na.rm = T)))) +
-        ggtitle(paste(i, ii)) -> GG3
-      
-      temp2 %>% 
-        mutate(error = as.numeric(ifelse(error == 1, 0, NA))) %>% 
-        ggplot(aes_string(x="datetime")) +
-        geom_line(aes(y = T2c), col = "brown1") +
-        geom_point(aes(y = error), col = "black") +
-        theme_minimal() +
-        ylab("T2 corrected") + xlab("Date")+
-        scale_y_continuous(limits = c(ifelse(min(temp2$T2f, na.rm = T) > 0, (-0.1), min(temp2$T2f, na.rm = T)),
-                                      ifelse(max(temp2$T2f, na.rm = T) < 0, 0.1, max(temp2$T2f, na.rm = T)))) +
-        ggtitle(paste(i, ii)) -> GG4
-      
-    } else {
-      temp2 %>% mutate(T2c = T2f) -> temp2
-      
-      temp2 %>% ggplot(aes_string(x="datetime")) +
-        theme_minimal() +
-        ggtitle(paste(i, ii, ", no correction")) -> GG3 -> GG4
-    }
-    
-    ####################################
-    # T3
-    
-    temp %>% filter(my == ii) %>%
-      filter(probl %in% c(0,6,9)) %>% 
-      select(datetime, T3, site) %>%
-      filter(complete.cases(.)) %>%
-      rename(T3f = T3,
-             site2 = site) -> temp3
-    
-    if(length(unique(as_date(temp3$datetime))) > 3 & NROW(temp3) > 100){
-      
-      # Cross correlate site to others and extract the site with highest correlation
-      temp3 %>%
-        left_join(., df3, by = "datetime") %>%
-        filter(site != i) %>%
-        mutate(T3 = ifelse(probl %in% c(0,3,6,9), T3, NA)) %>% 
-        arrange(site, datetime) %>% 
-        group_by(site) %>% 
-        summarise(cor = cor(T3f, T3)) %>% 
-        arrange(desc(cor)) %>% 
-        slice(1) %>% pull(site) -> site_to_compare
-      
-      temp3 %>%
-        left_join(., df3 %>% filter(site == site_to_compare), by = "datetime") %>%
-        select(datetime, T3f, T3) %>% 
-        mutate(me = T3f-T3) %>%
-        mutate(lag_T3 = me - lag(me)) %>%
-        mutate(lead_T3 = me - lead(me)) %>%
-        mutate(lag_T3f = T3f - lag(T3f)) %>%
-        mutate(lead_T3f = T3f - lead(T3f)) %>%
-        rowwise() %>% mutate(diff = sum(c(abs(lag_T3),abs(lead_T3)), na.rm = T),
-                             change = sum(c(abs(lag_T3f),abs(lead_T3f)), na.rm = T)) %>% 
-        ungroup() %>% 
-        mutate(roll_diff = rollapply(diff, width=48*3, FUN=my_mean, fill = NA, partial = T, align = "center")+0.001,
-               change_diff = rollapply(change, width=48*3, FUN=my_mean, fill = NA, partial = T, align = "center")+0.001) %>% 
-        mutate(rel_diff = diff/roll_diff,
-               rel_change = change/change_diff) %>%
-        mutate(rel_lag_T3f = lag_T3f/change_diff,
-               rel_lead_T3f = lead_T3f/change_diff) %>%
-        mutate(error = ifelse((rel_diff > 10 & rel_change > 10 & rel_lag_T3f > 10 & rel_lead_T3f > 5), 1, 0)) %>% 
-        mutate(error = ifelse((rel_diff > 15 & rel_change > 15 & rel_lag_T3f < (-10) & rel_lead_T3f < (-5)), 1, error)) %>% 
-        mutate(error = ifelse((rel_diff > 20 & rel_change > 20 & rel_lag_T3f > 10), 1, error)) %>%
-        mutate(error = ifelse((rel_diff > 20 & rel_change > 20 & rel_lead_T3f < (-10)), 1, error)) %>%
-        mutate(error = ifelse((lag_T3f > 6 & lead_T3f > 6), 1, error)) %>%
-        mutate(error = ifelse((lag_T3f < (-6) & lead_T3f < (-6)), 1, error)) %>%
-        mutate(error = ifelse((diff < 1), 0, error)) %>%
-        mutate(error = ifelse((diff > 20 | change > 20), 1, error)) %>%
-        mutate(error = error + lag(error,1) + lag(error,2) + lag(error,3) + lag(error,4) + lead(error)) %>%
-        mutate(error = ifelse(error > 1, 1, error)) %>%
-        mutate(T3c = ifelse(!is.na(error) & error == 1, NA, T3f)) %>% 
-        mutate(me = ifelse(!is.na(error) & error == 1, NA, me)) %>% 
-        mutate(fill = rollapply(me, width=11, FUN=mean, na.rm = T, fill = NA, partial = T, align = "center") + T3) %>% 
-        mutate(T3c = ifelse(is.na(T3c) & !is.na(error) & error == 1, fill, T3c)) -> temp3
-      
-      temp3 %>% 
-        mutate(error = as.numeric(ifelse(error == 1, 0, NA))) %>% 
-        ggplot(aes_string(x="datetime")) +
-        geom_line(aes(y = T3f), col = "cornflowerblue") +
-        geom_point(aes(y = error), col = "black") +
-        theme_minimal() +
-        ylab("T3") + xlab("Date")+
-        scale_y_continuous(limits = c(ifelse(min(temp3$T3f, na.rm = T) > 0, (-0.1), min(temp3$T3f, na.rm = T)),
-                                      ifelse(max(temp3$T3f, na.rm = T) < 0, 0.1, max(temp3$T3f, na.rm = T)))) +
-        ggtitle(paste(i, ii)) -> GG5
-      
-      temp3 %>% 
-        mutate(error = as.numeric(ifelse(error == 1, 0, NA))) %>% 
-        ggplot(aes_string(x="datetime")) +
-        geom_line(aes(y = T3c), col = "brown1") +
-        geom_point(aes(y = error), col = "black") +
-        theme_minimal() +
-        ylab("T3 corrected") + xlab("Date")+
-        scale_y_continuous(limits = c(ifelse(min(temp3$T3f, na.rm = T) > 0, (-0.1), min(temp3$T3f, na.rm = T)),
-                                      ifelse(max(temp3$T3f, na.rm = T) < 0, 0.1, max(temp3$T3f, na.rm = T)))) +
-        ggtitle(paste(i, ii)) -> GG6
-      
-    } else {
-      temp3 %>% mutate(T3c = T3f) -> temp3
-      
-      temp3 %>% ggplot(aes_string(x="datetime")) +
-        theme_minimal() +
-        ggtitle(paste(i, ii, ", no correction")) -> GG5 -> GG6
-    }
-    
-    #############################################
-    
-    print(plot_grid(plotlist = list(GG1,GG2,GG3,GG4,GG5,GG6), nrow = 3))
-    
-    
-    temp4 <- full_join(temp %>% filter(my == ii) %>% select(site, datetime, moist, date, probl),
-                       temp1 %>% select(datetime, T1c) %>%
-                         rename(T1 = T1c), by = "datetime")
-    temp4 <- full_join(temp4,
-                       temp2 %>% select(datetime, T2c) %>%
-                         rename(T2 = T2c), by = "datetime")
-    temp4 <- full_join(temp4,
-                       temp3 %>% select(datetime, T3c) %>%
-                         rename(T3 = T3c), by = "datetime")
-    
-    dftemp <- bind_rows(dftemp,temp4)
-    
-  }
-  dfall <- bind_rows(dfall, dftemp)
+  df3 <- df3 %>% 
+    filter(!(site_id == i & mins %in% as.numeric(names(tb))))
+  
 }
-dev.off()
-
-####################################################################
-# MASK IMPOSSIBLE VALUES
-
-dfall %>% mutate(T1 = ifelse(T1 < (-50) | T1 > 50, NA, T1),
-                 T2 = ifelse(T2 < (-50) | T2 > 50, NA, T2),
-                 T3 = ifelse(T3 < (-50) | T3 > 50, NA, T3),
-                 moist = ifelse(moist < 200 | moist >= 4096, NA, moist)) -> dfall
-
 
 ###############################################################################
 # PLOT CORRECTED
-
 
 pdf("visuals/Temperature_graphs_corrected.pdf", 12, 10)
 for(i in sites){
   #i <- "L12
   print(i)
-  dfall %>% filter(site == i) %>% 
+  df3 %>% filter(site == i) %>% 
     mutate(T1 = as.numeric(ifelse(probl %in% c(1,4,9), NA, T1))) %>% 
     mutate(T2 = as.numeric(ifelse(probl %in% c(1,7,8), NA, T2))) %>% 
     mutate(T3 = as.numeric(ifelse(probl %in% c(1,4,5,7,8), NA, T3))) %>% 
@@ -1725,7 +1222,7 @@ for(i in sites){
     scale_y_continuous(limits = c(-20, 35))+
     ggtitle(i) -> GG1
   
-  dfall %>% filter(site == i) %>% 
+  df3 %>% filter(site == i) %>% 
     mutate(moist = as.numeric(ifelse(probl %in% c(1,6,8,9), NA, moist))) %>% 
     mutate(moist = as.numeric(ifelse(T1 <= 1, NA, moist))) %>% 
     #group_by(date) %>% 
@@ -1743,10 +1240,8 @@ for(i in sites){
 }
 dev.off()
 
-
-round2 <- function(x) round(x,2)
-
-fwrite(dfall %>% select(-date) %>% 
-         mutate(across(T1:T3, round2)), "output/tomst_data.csv")
+fwrite(df3 %>% select(-c(zone, site_id, date, mins)) %>% 
+         relocate(site, tomst_id) %>% rename(error_tomst = probl), 
+       "output/tomst_data_raw.csv")
 
 ####################################################################################
